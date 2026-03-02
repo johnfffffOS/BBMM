@@ -1,0 +1,2084 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>BRAINBUG — Mind Mapping System</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --lumon-bg:       #f5f2ec;
+  --lumon-bg2:      #ede9e1;
+  --lumon-bg3:      #e2ddd5;
+  --lumon-ink:      #1a1814;
+  --lumon-ink2:     #3d3a34;
+  --lumon-ink3:     #7a756c;
+  --lumon-ink4:     #b0aa9f;
+  --term-green:     #2d6a2d;
+  --term-green-hi:  #3a8a3a;
+  --term-green-glo: #4db84d;
+  --term-green-bg:  #e8f0e8;
+  --node-sage:      #4a7c59;
+  --font: 'IBM Plex Mono', monospace;
+  --topbar-h: 52px;
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+}
+
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: var(--lumon-bg);
+  color: var(--lumon-ink);
+  font-family: var(--font);
+  font-size: 12px;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+/* ═══════════════════════════════════════
+   SCANLINES + VIGNETTE
+   ═══════════════════════════════════════ */
+body::after {
+  content: '';
+  position: fixed; inset: 0;
+  background: repeating-linear-gradient(
+    0deg, transparent, transparent 2px,
+    rgba(0,0,0,0.007) 2px, rgba(0,0,0,0.007) 3px
+  );
+  pointer-events: none; z-index: 999;
+}
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(170,160,145,0.22) 100%);
+  pointer-events: none; z-index: 998;
+}
+
+/* ═══════════════════════════════════════
+   CANVAS
+   ═══════════════════════════════════════ */
+#canvas-container {
+  position: fixed;
+  top: var(--topbar-h);
+  left: 0; right: 0; bottom: 0;
+  overflow: hidden;
+  background: var(--lumon-bg);
+  touch-action: none;
+}
+svg#chart {
+  width: 100%; height: 100%;
+  background: transparent;
+  touch-action: none;
+}
+
+/* ═══════════════════════════════════════
+   LINKS
+   ═══════════════════════════════════════ */
+.link { stroke: #c8c0b0; stroke-width: 1.5px; fill: none; opacity: 0.75; }
+.link.hot { stroke: var(--term-green); stroke-width: 2px; opacity: 1; }
+
+/* ═══════════════════════════════════════
+   NODES
+   ═══════════════════════════════════════ */
+.node { cursor: grab; }
+.node:active { cursor: grabbing; }
+.node-body { stroke-width: 1.5px; transition: filter 0.18s ease, stroke-width 0.1s; }
+.node-label {
+  font-family: var(--font); font-weight: 600;
+  text-anchor: middle; dominant-baseline: middle;
+  pointer-events: none; letter-spacing: 0.07em;
+}
+.node-id {
+  font-family: var(--font); font-size: 7px; font-weight: 400;
+  text-anchor: end; dominant-baseline: middle;
+  pointer-events: none; opacity: 0.3; letter-spacing: 0.05em;
+}
+.node-note-dot { pointer-events: none; }
+.node-cross {
+  font-family: var(--font); font-size: 9px;
+  text-anchor: middle; pointer-events: none; opacity: 0.65;
+}
+.ripple-ring { fill: none; pointer-events: none; }
+.sel-glow { pointer-events: none; }
+.inline-edit {
+  font-family: var(--font); font-weight: 600;
+  background: transparent; border: none;
+  border-bottom: 1.5px solid currentColor;
+  color: inherit; outline: none;
+  text-align: center; width: 100%;
+  caret-color: currentColor; letter-spacing: 0.07em;
+  -webkit-appearance: none;
+}
+
+/* ═══════════════════════════════════════
+   TOP BAR — mobile compact
+   ═══════════════════════════════════════ */
+#topbar {
+  position: fixed; top: 0; left: 0; right: 0;
+  height: var(--topbar-h);
+  background: var(--lumon-ink);
+  border-bottom: 2px solid var(--term-green);
+  display: flex; align-items: center;
+  padding: 0 12px; gap: 0; z-index: 100;
+  padding-left: calc(12px + var(--safe-l));
+  padding-right: calc(12px + var(--safe-r));
+}
+
+.logo { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.logo-cross {
+  color: var(--lumon-bg); font-size: 14px;
+  animation: cross-breathe 6s ease-in-out infinite; opacity: 0.4;
+  flex-shrink: 0;
+}
+@keyframes cross-breathe { 0%,100%{opacity:0.2} 50%{opacity:0.7} }
+.logo-title {
+  color: var(--term-green-glo); font-size: 12px; font-weight: 700;
+  letter-spacing: 0.22em; text-transform: uppercase;
+  white-space: nowrap;
+}
+.logo-sub {
+  color: #8a8880; font-size: 8px; letter-spacing: 0.1em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  display: none; /* hidden on very small screens */
+}
+@media (min-width: 360px) {
+  .logo-sub { display: block; }
+}
+
+/* Top bar action buttons */
+.topbar-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+
+.tb-btn {
+  font-family: var(--font); font-size: 10px; font-weight: 700;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  padding: 0 14px;
+  background: transparent; color: #9a9890;
+  border: 1px solid #2e2e2e; cursor: pointer;
+  transition: all 0.1s; white-space: nowrap;
+  height: 36px; display: flex; align-items: center; justify-content: center;
+  min-width: 44px;
+  -webkit-appearance: none;
+}
+.tb-btn:active { background: #1e1e1e; border-color: #444; color: var(--lumon-bg); }
+.tb-btn.accent { color: var(--term-green-glo); border-color: var(--term-green); }
+.tb-btn.accent:active {
+  background: rgba(45,106,45,0.18);
+  border-color: var(--term-green-glo);
+  box-shadow: 0 0 8px rgba(77,184,77,0.15);
+}
+
+/* Hamburger menu button */
+.tb-btn.menu-btn {
+  font-size: 16px; letter-spacing: 0;
+  border-color: #2e2e2e;
+  color: #888;
+}
+.tb-btn.menu-btn:active { color: var(--term-green-glo); border-color: var(--term-green); }
+
+/* ═══════════════════════════════════════
+   HAMBURGER DRAWER
+   ═══════════════════════════════════════ */
+#drawer-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 300; display: none;
+  backdrop-filter: blur(2px);
+}
+#drawer-overlay.open { display: block; }
+
+#hamburger-drawer {
+  position: fixed;
+  top: var(--topbar-h);
+  right: 0;
+  width: min(280px, 88vw);
+  bottom: 0;
+  background: var(--lumon-ink);
+  border-left: 1px solid #2a2a2a;
+  border-top: 2px solid var(--term-green);
+  z-index: 301;
+  transform: translateX(100%);
+  transition: transform 0.26s cubic-bezier(0.16,1,0.3,1);
+  display: flex; flex-direction: column;
+  overflow-y: auto;
+  padding-bottom: var(--safe-b);
+}
+#hamburger-drawer.open { transform: translateX(0); }
+
+.drawer-section-label {
+  font-size: 7px; color: #3a3835;
+  letter-spacing: 0.28em; text-transform: uppercase;
+  padding: 16px 18px 8px;
+  border-bottom: 1px solid #1a1a1a;
+}
+.drawer-item {
+  display: flex; align-items: center; gap: 14px;
+  padding: 16px 18px;
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: #888; cursor: pointer;
+  border-bottom: 1px solid #111;
+  transition: background 0.08s;
+  min-height: 52px;
+}
+.drawer-item:active { background: #111; }
+.drawer-item .di-icon { font-size: 14px; opacity: 0.5; width: 20px; text-align: center; }
+.drawer-item:active .di-icon { opacity: 1; }
+.drawer-item.accent { color: var(--term-green-glo); }
+.drawer-item.accent .di-icon { opacity: 0.7; }
+.drawer-item.accent:active { background: rgba(45,106,45,0.1); }
+.drawer-item.danger { color: #cc4444; }
+.drawer-item.danger:active { background: #0e0303; }
+
+/* ═══════════════════════════════════════
+   NODE TOOLBAR — mobile bottom bar
+   ═══════════════════════════════════════ */
+#node-toolbar {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  transform: translateY(100%);
+  transition: transform 0.24s cubic-bezier(0.16,1,0.3,1), opacity 0.18s;
+  opacity: 0; z-index: 150; pointer-events: none;
+  font-family: var(--font);
+  padding-bottom: var(--safe-b);
+}
+#node-toolbar.visible {
+  transform: translateY(0);
+  opacity: 1; pointer-events: all;
+}
+#node-toolbar-inner {
+  display: flex; flex-direction: column;
+  background: var(--lumon-ink);
+  border-top: 2px solid var(--term-green);
+  box-shadow: 0 -6px 32px rgba(0,0,0,0.6), 0 0 0 1px #000;
+}
+
+/* Node name strip */
+#ntb-header {
+  display: flex; align-items: center;
+  padding: 8px 16px 6px;
+  border-bottom: 1px solid #1e1e1e;
+  gap: 10px;
+}
+#ntb-label-name {
+  font-size: 12px; font-weight: 700;
+  color: var(--lumon-bg); letter-spacing: 0.1em;
+  flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#ntb-label-id { font-size: 8px; color: #5a5855; letter-spacing: 0.14em; flex-shrink: 0; }
+
+/* Action buttons row */
+#ntb-buttons {
+  display: flex; align-items: stretch;
+}
+.ntb-btn {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 4px; padding: 12px 4px;
+  background: transparent; border: none;
+  border-right: 1px solid #1a1a1a;
+  cursor: pointer; transition: background 0.1s;
+  font-family: var(--font); flex: 1;
+  min-height: 64px;
+  -webkit-appearance: none;
+}
+.ntb-btn:last-child { border-right: none; }
+.ntb-btn:active { background: #111; }
+.ntb-icon { font-size: 18px; opacity: 0.5; line-height: 1; color: #aaa; transition: opacity 0.1s, color 0.1s; }
+.ntb-text { font-size: 8px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #7a7870; transition: color 0.1s; }
+
+.ntb-btn.add:active  .ntb-icon  { opacity: 1; color: var(--term-green-glo); }
+.ntb-btn.add:active  .ntb-text  { color: var(--term-green-glo); }
+.ntb-btn.notes:active .ntb-icon { opacity: 1; color: #6699cc; }
+.ntb-btn.notes:active .ntb-text { color: #6699cc; }
+.ntb-btn.edit:active  .ntb-icon { opacity: 1; color: #ccaa44; }
+.ntb-btn.edit:active  .ntb-text { color: #ccaa44; }
+.ntb-btn.del:active   .ntb-icon { opacity: 1; color: #cc4444; }
+.ntb-btn.del:active   .ntb-text { color: #cc4444; }
+
+/* ═══════════════════════════════════════
+   CONTEXT MENU — mobile bottom sheet
+   ═══════════════════════════════════════ */
+#ctx-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 400; display: none;
+}
+#ctx-overlay.open { display: block; }
+
+#context-menu {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  background: var(--lumon-ink);
+  border-top: 2px solid var(--term-green);
+  border-radius: 14px 14px 0 0;
+  z-index: 401;
+  display: none;
+  transform: translateY(100%);
+  transition: transform 0.28s cubic-bezier(0.16,1,0.3,1);
+  font-family: var(--font);
+  padding-bottom: var(--safe-b);
+  box-shadow: 0 -8px 40px rgba(0,0,0,0.6);
+}
+#context-menu.open {
+  transform: translateY(0);
+  display: block;
+}
+
+.ctx-handle {
+  width: 36px; height: 4px;
+  background: #333; border-radius: 2px;
+  margin: 10px auto 4px;
+}
+.ctx-header {
+  padding: 6px 18px 10px;
+  font-size: 9px; color: var(--term-green);
+  border-bottom: 1px solid #1e1e1e;
+  letter-spacing: 0.22em; text-transform: uppercase;
+}
+.ctx-item {
+  padding: 16px 18px; font-size: 12px; color: #999;
+  cursor: pointer; display: flex; align-items: center; gap: 14px;
+  transition: background 0.07s; letter-spacing: 0.06em;
+  border-top: 1px solid #111;
+  min-height: 52px;
+}
+.ctx-item:first-of-type { border-top: none; }
+.ctx-item:active { background: #1a1a1a; color: var(--lumon-bg); }
+.ctx-icon { width: 20px; text-align: center; font-size: 15px; opacity: 0.5; }
+.ctx-item:active .ctx-icon { opacity: 1; }
+.ctx-item.destructive { color: #884444; }
+.ctx-item.destructive:active { background: #140606; color: #ff6666; }
+.ctx-sep { border-top: 1px solid #222 !important; }
+
+/* ═══════════════════════════════════════
+   MODAL — mobile full screen
+   ═══════════════════════════════════════ */
+#modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(10,9,8,0.85);
+  z-index: 200; display: none;
+  align-items: flex-end; justify-content: center;
+}
+#modal-overlay.open { display: flex; }
+
+#modal {
+  background: var(--lumon-bg2);
+  border-top: 3px solid var(--term-green);
+  border-radius: 16px 16px 0 0;
+  width: 100%;
+  max-height: calc(100dvh - var(--topbar-h));
+  max-height: calc(100vh - var(--topbar-h));
+  display: flex; flex-direction: column;
+  box-shadow: 0 -12px 48px rgba(0,0,0,0.5);
+  overflow: hidden; font-family: var(--font);
+}
+.modal-drag-handle {
+  width: 36px; height: 4px; background: #ccc8c0;
+  border-radius: 2px; margin: 10px auto 2px;
+  flex-shrink: 0;
+}
+#modal-header {
+  padding: 10px 16px 12px;
+  border-bottom: 1px solid var(--lumon-bg3);
+  display: flex; align-items: flex-start; gap: 12px; flex-shrink: 0;
+  background: var(--lumon-bg);
+}
+#modal-header-info { flex: 1; min-width: 0; }
+#modal-node-label {
+  font-size: 16px; font-weight: 700;
+  letter-spacing: 0.06em; margin-bottom: 3px;
+  color: var(--lumon-ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#modal-node-meta { font-size: 8px; color: var(--lumon-ink3); letter-spacing: 0.18em; text-transform: uppercase; }
+.modal-close-btn {
+  font-family: var(--font); font-size: 8px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  padding: 0 14px; background: var(--lumon-bg);
+  color: var(--lumon-ink3); border: 1px solid var(--lumon-bg3);
+  cursor: pointer; flex-shrink: 0; height: 36px; min-width: 44px;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.1s;
+  -webkit-appearance: none;
+}
+.modal-close-btn:active { background: var(--lumon-bg3); color: var(--lumon-ink); }
+#modal-body {
+  padding: 16px; overflow-y: auto; flex: 1;
+  background: var(--lumon-bg2);
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 8px;
+}
+.modal-section { margin-bottom: 20px; }
+.modal-section-label {
+  font-size: 8px; color: var(--lumon-ink3);
+  letter-spacing: 0.24em; text-transform: uppercase;
+  margin-bottom: 10px; padding-bottom: 6px;
+  border-bottom: 1px solid var(--lumon-bg3);
+  display: flex; align-items: center; gap: 8px;
+}
+.modal-section-label::before { content:'▸'; color: var(--term-green); font-size: 8px; }
+
+#modal-notes {
+  width: 100%; min-height: 100px;
+  background: var(--lumon-bg);
+  border: 1px solid var(--lumon-bg3);
+  border-left: 3px solid var(--term-green);
+  color: var(--lumon-ink); font-family: var(--font); font-size: 13px;
+  padding: 10px 12px; resize: vertical; outline: none; line-height: 1.8;
+  transition: border-left-color 0.2s;
+  -webkit-appearance: none;
+}
+#modal-notes:focus { border-left-color: var(--term-green-hi); background: #faf8f4; }
+
+/* Tag toggles — mobile optimized */
+.tag-toggles { display: flex; gap: 8px; }
+.tag-toggle {
+  display: flex; align-items: center; gap: 6px;
+  padding: 10px 10px;
+  border: 1px solid var(--lumon-bg3); background: var(--lumon-bg);
+  cursor: pointer; font-family: var(--font);
+  font-size: 9px; font-weight: 600; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--lumon-ink3);
+  transition: all 0.12s; flex: 1; min-height: 44px;
+  justify-content: center;
+  -webkit-appearance: none;
+}
+.tag-toggle-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.tag-toggle.urgent { border-color: #5a2020; }
+.tag-toggle.urgent .tag-toggle-dot { background: #cc2222; box-shadow: 0 0 5px rgba(204,34,34,0.6); }
+.tag-toggle.urgent:active { background: #0e0202; }
+.tag-toggle.urgent.active { background: #160404; border-color: #cc2222; color: #ff7777; }
+.tag-toggle.review { border-color: #5a4400; }
+.tag-toggle.review .tag-toggle-dot { background: #ddaa00; }
+.tag-toggle.review:active { background: #0e0a00; }
+.tag-toggle.review.active { background: #141000; border-color: #ddaa00; color: #ffcc44; }
+.tag-toggle.personal { border-color: #1e3e1e; }
+.tag-toggle.personal .tag-toggle-dot { background: #44aa44; }
+.tag-toggle.personal:active { background: #020e02; }
+.tag-toggle.personal.active { background: #040e04; border-color: #44aa44; color: #66dd66; }
+
+.tag-legend {
+  display: flex; flex-direction: column; gap: 8px; margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--lumon-bg); border: 1px solid var(--lumon-bg3);
+  border-left: 3px solid var(--lumon-ink4);
+}
+.tag-legend-item { display: flex; align-items: center; gap: 8px; font-size: 9px; color: var(--lumon-ink3); letter-spacing: 0.08em; }
+.tl-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+
+/* Size slider */
+#size-slider-row { display: flex; align-items: center; gap: 14px; }
+#node-size-slider {
+  flex: 1; -webkit-appearance: none; appearance: none;
+  height: 4px; background: var(--lumon-bg3); outline: none;
+  border-radius: 2px;
+}
+#node-size-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 22px; height: 22px;
+  background: var(--lumon-ink); border: 2px solid var(--term-green);
+  cursor: pointer; border-radius: 0;
+}
+#size-val { font-size: 10px; color: var(--term-green); min-width: 36px; text-align: right; font-weight: 600; }
+
+/* Color swatches — mobile grid */
+#modal-color-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+.swatch-col { display: flex; flex-direction: column; align-items: center; gap: 5px; cursor: pointer; }
+.color-swatch {
+  width: 100%; aspect-ratio: 1;
+  border-radius: 4px;
+  transition: transform 0.1s, box-shadow 0.1s; position: relative;
+}
+.swatch-col:active .color-swatch { transform: scale(0.95); }
+.color-swatch.active { box-shadow: 0 0 0 2px var(--lumon-ink), 0 0 0 4px var(--term-green); }
+.color-swatch.active::after {
+  content:'✓'; position:absolute; inset:0;
+  display:flex; align-items:center; justify-content:center;
+  font-size:16px; font-weight:900; color:rgba(255,255,255,0.9);
+}
+.swatch-label { font-size: 7px; color: var(--lumon-ink3); letter-spacing: 0.1em; }
+
+#modal-footer {
+  padding: 12px 16px;
+  padding-bottom: calc(12px + var(--safe-b));
+  border-top: 1px solid var(--lumon-bg3);
+  display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+  background: var(--lumon-bg);
+}
+#modal-footer .spacer { flex: 1; }
+#modal-saved-indicator { font-size: 8px; color: var(--term-green); letter-spacing: 0.16em; opacity: 0; transition: opacity 0.3s; }
+#modal-saved-indicator.show { opacity: 1; }
+
+.mfooter-btn {
+  font-family: var(--font); font-size: 10px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  padding: 0 16px; cursor: pointer; height: 40px; min-width: 44px;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.1s;
+  -webkit-appearance: none;
+}
+.mfooter-btn.danger { color: #cc4444; border: 1px solid #e0cccc; background: var(--lumon-bg); }
+.mfooter-btn.danger:active { background: #fff0f0; border-color: #cc4444; }
+.mfooter-btn.accent { color: var(--term-green); border: 1px solid var(--term-green); background: var(--lumon-bg); }
+.mfooter-btn.accent:active { background: var(--term-green-bg); }
+
+/* ═══════════════════════════════════════
+   ZOOM CONTROLS — larger touch targets
+   ═══════════════════════════════════════ */
+#zoom-controls {
+  position: fixed; right: 12px;
+  bottom: calc(var(--safe-b) + 16px);
+  display: flex; flex-direction: column; gap: 2px; z-index: 120;
+  transition: bottom 0.24s cubic-bezier(0.16,1,0.3,1);
+}
+#zoom-controls.toolbar-up {
+  bottom: calc(var(--safe-b) + 16px + 88px);
+}
+.zoom-btn {
+  width: 40px; height: 40px;
+  background: var(--lumon-ink);
+  border: 1px solid #2a2a2a;
+  color: #555; font-family: var(--font); font-size: 20px;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: all 0.1s;
+  -webkit-appearance: none;
+}
+.zoom-btn:active { background: #1a1a1a; color: var(--term-green-glo); border-color: var(--term-green); }
+
+/* ═══════════════════════════════════════
+   MINIMAP — smaller, repositioned
+   ═══════════════════════════════════════ */
+#minimap {
+  position: fixed; left: 12px;
+  bottom: calc(var(--safe-b) + 16px);
+  width: 120px; height: 82px;
+  background: var(--lumon-ink);
+  border: 1px solid #222; z-index: 120; overflow: hidden;
+  transition: bottom 0.24s cubic-bezier(0.16,1,0.3,1);
+}
+#minimap.toolbar-up {
+  bottom: calc(var(--safe-b) + 16px + 88px);
+}
+#minimap-label {
+  position: absolute; top: 4px; right: 6px;
+  font-family: var(--font); font-size: 6px; color: #2e2e2e;
+  letter-spacing: 0.14em; z-index: 1; pointer-events: none;
+}
+#minimap canvas { width: 100%; height: 100%; }
+
+/* ═══════════════════════════════════════
+   ROLODEX PANEL — mobile full overlay
+   ═══════════════════════════════════════ */
+#rolodex-panel {
+  position: fixed;
+  top: var(--topbar-h);
+  left: 0; right: 0; bottom: 0;
+  z-index: 129;
+  font-family: var(--font);
+  display: none;
+  flex-direction: column;
+  background: var(--lumon-ink);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+#rolodex-panel.open { display: flex; }
+
+.rdx-header {
+  background: var(--lumon-ink);
+  border-bottom: 2px solid var(--term-green);
+  padding: 12px 16px 10px;
+  display: flex; align-items: center; justify-content: space-between;
+  flex-shrink: 0;
+}
+.rdx-header-title {
+  font-size: 9px; font-weight: 700;
+  letter-spacing: 0.3em; text-transform: uppercase;
+  color: var(--term-green);
+}
+.rdx-header-count {
+  font-size: 7px; color: #5a5855; letter-spacing: 0.14em;
+}
+.rdx-close-btn {
+  font-family: var(--font); font-size: 8px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  padding: 0 12px; background: transparent;
+  color: #666; border: 1px solid #333;
+  cursor: pointer; height: 32px; min-width: 44px;
+  display: flex; align-items: center; justify-content: center;
+  -webkit-appearance: none;
+}
+.rdx-close-btn:active { background: #111; color: #aaa; }
+
+.rdx-card {
+  background: var(--lumon-ink);
+  border-bottom: 1px solid #111;
+  overflow: hidden;
+  transition: border-color 0.15s;
+  position: relative;
+}
+.rdx-card::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  transition: background 0.15s;
+}
+.rdx-card.color-rose::before   { background: #8a3040; }
+.rdx-card.color-amber::before  { background: #8a6020; }
+.rdx-card.color-navy::before   { background: #1e3a5f; }
+.rdx-card.color-sage::before   { background: #4a7c59; }
+.rdx-card.color-white::before  { background: #888880; }
+.rdx-card.color-cyan::before   { background: #2a7070; }
+.rdx-card.color-plum::before   { background: #5a2a6a; }
+.rdx-card.color-rust::before   { background: #7a3820; }
+
+.rdx-card-tab {
+  padding: 14px 16px 14px 20px;
+  display: flex; align-items: center; gap: 10px;
+  cursor: pointer;
+  transition: background 0.1s;
+  position: relative;
+  min-height: 52px;
+}
+.rdx-card-tab:active { background: #0d0d0d; }
+.rdx-card.expanded .rdx-card-tab { border-bottom: 1px solid #1e1e1e; }
+
+.rdx-tab-color {
+  width: 9px; height: 9px;
+  border-radius: 50%; flex-shrink: 0;
+}
+.rdx-tab-label {
+  flex: 1;
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 0.16em; text-transform: uppercase;
+  color: #c8c4be;
+}
+.rdx-tab-id {
+  font-size: 7px; color: #4a4845;
+  letter-spacing: 0.1em;
+}
+.rdx-tab-arrow {
+  font-size: 9px; color: #3a3835;
+  transition: transform 0.22s cubic-bezier(0.16,1,0.3,1), color 0.12s;
+  margin-left: 6px;
+}
+.rdx-card.expanded .rdx-tab-arrow {
+  transform: rotate(90deg);
+  color: var(--term-green);
+}
+
+.rdx-card-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.28s cubic-bezier(0.16,1,0.3,1);
+}
+.rdx-card.expanded .rdx-card-body { grid-template-rows: 1fr; }
+.rdx-card-body-inner { overflow: hidden; }
+.rdx-card-content {
+  padding: 12px 16px 14px 20px;
+  border-top: 1px solid #111;
+  background: #0a0a0a;
+}
+
+.rdx-section-label {
+  font-size: 7px; letter-spacing: 0.22em;
+  text-transform: uppercase; color: #3a3835;
+  margin-bottom: 8px; margin-top: 4px;
+  display: flex; align-items: center; gap: 6px;
+}
+.rdx-section-label::after { content: ''; flex: 1; height: 1px; background: #1a1a1a; }
+
+.rdx-children-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.rdx-child-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 10px;
+  background: #111; border: 1px solid #1e1e1e;
+  cursor: pointer;
+  transition: background 0.08s;
+  min-height: 44px;
+}
+.rdx-child-row:active { background: #1a1a1a; border-color: var(--term-green); }
+.rdx-child-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.rdx-child-name {
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 0.12em; color: #8a8880;
+  text-transform: uppercase; flex: 1;
+}
+.rdx-child-tags { display: flex; gap: 4px; }
+.rdx-tag-dot { width: 5px; height: 5px; border-radius: 50%; }
+
+.rdx-notes {
+  font-size: 10px; color: #666460; line-height: 1.7;
+  letter-spacing: 0.03em; font-style: italic;
+  background: #0d0d0d; border-left: 2px solid #1e1e1e;
+  padding: 8px 10px;
+}
+.rdx-notes-empty { color: #333; font-style: italic; }
+.rdx-no-children { font-size: 8px; color: #333; letter-spacing: 0.1em; padding: 4px 0 8px; }
+
+.rdx-card-tab .rdx-tab-badge {
+  font-size: 7px; color: #3a3835;
+  background: #111; border: 1px solid #1e1e1e;
+  padding: 2px 5px; letter-spacing: 0.05em;
+}
+
+/* ═══════════════════════════════════════
+   FLASH / STATUS TOAST
+   ═══════════════════════════════════════ */
+#status-toast {
+  position: fixed;
+  top: calc(var(--topbar-h) + 10px);
+  left: 50%; transform: translateX(-50%);
+  background: var(--lumon-ink);
+  border: 1px solid #333;
+  border-left: 3px solid var(--term-green);
+  color: #aaa; font-family: var(--font); font-size: 9px;
+  letter-spacing: 0.12em; padding: 7px 14px;
+  z-index: 500; pointer-events: none;
+  white-space: nowrap;
+  opacity: 0; transition: opacity 0.22s;
+  max-width: calc(100vw - 32px);
+  overflow: hidden; text-overflow: ellipsis;
+}
+#status-toast.show { opacity: 1; }
+
+/* ═══════════════════════════════════════
+   SCROLLBAR
+   ═══════════════════════════════════════ */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: var(--lumon-bg3); }
+::-webkit-scrollbar-thumb { background: var(--lumon-ink4); }
+</style>
+</head>
+<body>
+
+<!-- ═══ TOP BAR ═══ -->
+<div id="topbar">
+  <div class="logo">
+    <span class="logo-cross">✝</span>
+    <span class="logo-title">BRAINBUG</span>
+    <span class="logo-sub">Mind Map</span>
+  </div>
+  <div class="topbar-actions">
+    <button class="tb-btn accent" id="btn-add-node">+ NODE</button>
+    <button class="tb-btn menu-btn" id="btn-hamburger" aria-label="Menu">☰</button>
+  </div>
+</div>
+
+<!-- ═══ HAMBURGER DRAWER ═══ -->
+<div id="drawer-overlay"></div>
+<div id="hamburger-drawer">
+  <div class="drawer-section-label">ACTIONS</div>
+  <div class="drawer-item accent" id="drawer-index">
+    <span class="di-icon">⊟</span> NODE INDEX
+  </div>
+  <div class="drawer-item" id="drawer-reset-view">
+    <span class="di-icon">◎</span> RESET VIEW
+  </div>
+  <div class="drawer-section-label">DATA</div>
+  <div class="drawer-item" id="drawer-export">
+    <span class="di-icon">↑</span> EXPORT JSON
+  </div>
+  <div class="drawer-item" id="drawer-import">
+    <span class="di-icon">↓</span> IMPORT JSON
+  </div>
+  <input type="file" id="file-import" accept=".json" style="display:none">
+  <div class="drawer-section-label">DANGER ZONE</div>
+  <div class="drawer-item danger" id="drawer-clear">
+    <span class="di-icon">✕</span> CLEAR ALL
+  </div>
+</div>
+
+<!-- ═══ ROLODEX ═══ -->
+<div id="rolodex-panel">
+  <div class="rdx-header">
+    <span class="rdx-header-title">✝ NODE INDEX</span>
+    <span class="rdx-header-count" id="rdx-count">— RECORDS</span>
+    <button class="rdx-close-btn" id="rdx-close-btn">CLOSE</button>
+  </div>
+  <div id="rdx-cards"></div>
+</div>
+
+<!-- ═══ CANVAS ═══ -->
+<div id="canvas-container">
+  <canvas id="grid-canvas" style="position:absolute;inset:0;pointer-events:none;z-index:0;"></canvas>
+  <svg id="chart" style="position:relative;z-index:1;">
+    <defs>
+      <filter id="glow-white" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+      <filter id="glow-sage"  x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+      <filter id="glow-cyan"  x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+      <filter id="glow-amber" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+      <filter id="glow-rose"  x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+      <filter id="glow-navy"  x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+      <filter id="glow-plum"  x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+      <filter id="glow-rust"  x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+      <filter id="urgent-blur" x="-150%" y="-150%" width="500%" height="500%">
+        <feGaussianBlur stdDeviation="22"/>
+      </filter>
+    </defs>
+    <g id="main-group">
+      <g id="urgentglow-layer"></g>
+      <g id="glow-layer"></g>
+      <g id="links-layer"></g>
+      <g id="nodes-layer"></g>
+      <g id="ripple-layer"></g>
+    </g>
+  </svg>
+</div>
+
+<!-- ═══ NODE TOOLBAR ═══ -->
+<div id="node-toolbar">
+  <div id="node-toolbar-inner">
+    <div id="ntb-header">
+      <div id="ntb-label-name">—</div>
+      <div id="ntb-label-id">NO SELECTION</div>
+    </div>
+    <div id="ntb-buttons">
+      <button class="ntb-btn add"   id="ntb-add">
+        <span class="ntb-icon">✦</span>
+        <span class="ntb-text">Add Child</span>
+      </button>
+      <button class="ntb-btn notes" id="ntb-notes">
+        <span class="ntb-icon">☰</span>
+        <span class="ntb-text">Notes</span>
+      </button>
+      <button class="ntb-btn edit"  id="ntb-edit">
+        <span class="ntb-icon">✎</span>
+        <span class="ntb-text">Edit</span>
+      </button>
+      <button class="ntb-btn del"   id="ntb-del">
+        <span class="ntb-icon">✕</span>
+        <span class="ntb-text">Delete</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ CONTEXT MENU — mobile bottom sheet ═══ -->
+<div id="ctx-overlay"></div>
+<div id="context-menu">
+  <div class="ctx-handle"></div>
+  <div class="ctx-header" id="ctx-title">// NODE OPTIONS</div>
+  <div class="ctx-item" id="ctx-add-child"><span class="ctx-icon">✦</span> Add Child Node</div>
+  <div class="ctx-item" id="ctx-edit-label"><span class="ctx-icon">✎</span> Edit Label</div>
+  <div class="ctx-item" id="ctx-open-notes"><span class="ctx-icon">☰</span> Open Notes</div>
+  <div class="ctx-item ctx-sep destructive" id="ctx-delete"><span class="ctx-icon">✕</span> Delete Node</div>
+</div>
+
+<!-- ═══ ZOOM ═══ -->
+<div id="zoom-controls">
+  <button class="zoom-btn" id="btn-zoom-in">+</button>
+  <button class="zoom-btn" id="btn-zoom-out">−</button>
+</div>
+
+<!-- ═══ MINIMAP ═══ -->
+<div id="minimap">
+  <div id="minimap-label">OVERVIEW</div>
+  <canvas id="minimap-canvas" width="120" height="82"></canvas>
+</div>
+
+<!-- ═══ NOTES MODAL ═══ -->
+<div id="modal-overlay">
+  <div id="modal">
+    <div class="modal-drag-handle"></div>
+    <div id="modal-header">
+      <div id="modal-header-info">
+        <div id="modal-node-label">NODE</div>
+        <div id="modal-node-meta">ID: <span id="modal-node-id">—</span> · BRAINBUG</div>
+      </div>
+      <button class="modal-close-btn" id="modal-close-btn">✕</button>
+    </div>
+    <div id="modal-body">
+      <div class="modal-section">
+        <div class="modal-section-label">HIDDEN NOTES</div>
+        <textarea id="modal-notes" placeholder="Extended notes and observations for this node.&#10;All data persists locally."></textarea>
+      </div>
+      <div class="modal-section">
+        <div class="modal-section-label">STATUS TAGS</div>
+        <div class="tag-toggles">
+          <button class="tag-toggle urgent"   id="tag-urgent"   type="button"><span class="tag-toggle-dot"></span> URGENT</button>
+          <button class="tag-toggle review"   id="tag-review"   type="button"><span class="tag-toggle-dot"></span> REVIEW</button>
+          <button class="tag-toggle personal" id="tag-personal" type="button"><span class="tag-toggle-dot"></span> PERSONAL</button>
+        </div>
+        <div class="tag-legend">
+          <div class="tag-legend-item"><div class="tl-dot" style="background:#cc2222;box-shadow:0 0 4px rgba(204,34,34,0.7)"></div> URGENT — red halo behind node</div>
+          <div class="tag-legend-item"><div class="tl-dot" style="background:#ddaa00"></div> REVIEW — blinking amber dot</div>
+          <div class="tag-legend-item"><div class="tl-dot" style="background:#44aa44"></div> PERSONAL — steady green dot</div>
+        </div>
+      </div>
+      <div class="modal-section" id="size-section" style="display:none">
+        <div class="modal-section-label">NODE SIZE</div>
+        <div id="size-slider-row">
+          <input type="range" id="node-size-slider" min="0.5" max="2.0" step="0.05" value="1.0">
+          <span id="size-val">1.0×</span>
+        </div>
+      </div>
+      <div class="modal-section">
+        <div class="modal-section-label">NODE COLOR</div>
+        <div id="modal-color-row"></div>
+      </div>
+    </div>
+    <div id="modal-footer">
+      <span id="modal-saved-indicator">✓ SAVED</span>
+      <div class="spacer"></div>
+      <button class="mfooter-btn danger" id="modal-delete-btn">DELETE</button>
+      <button class="mfooter-btn accent" id="modal-save-btn">SAVE</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ TOAST ═══ -->
+<div id="status-toast"></div>
+
+<script>
+'use strict';
+
+/* ═══════════════════════════════════════
+   CONFIG
+   ═══════════════════════════════════════ */
+const CFG = {
+  linkDistance:    190,
+  linkStrength:    0.20,
+  chargeStrength:  -520,
+  alphaDecay:      0.016,
+  alphaMin:        0,
+  collideAlphaFloor: 0.002,
+  velocityDecay:   0.55,
+  centerStrength:  0.018,
+  collideStrength: 0.85,
+  baseNodeW:       148,
+  baseNodeH:       46,
+  rootNodeW:       178,
+  rootNodeH:       56,
+  cornerRadius:    10,
+  driftInterval:   3000,
+  driftAlpha:      0.04,
+  driftMaxVel:     0.3,
+  rippleMaxR:      100,
+  rippleDur:       640,
+  rippleRings:     3,
+  rippleDelay:     100,
+  colors: [
+    { key:'white',  label:'IVORY',  stroke:'#888880', fill:'#faf8f2', text:'#1a1814', glow:'glow-white'  },
+    { key:'sage',   label:'SAGE',   stroke:'#4a7c59', fill:'#eef5f0', text:'#2a5038', glow:'glow-sage'   },
+    { key:'cyan',   label:'TEAL',   stroke:'#2a7070', fill:'#eef4f4', text:'#1a5050', glow:'glow-cyan'   },
+    { key:'amber',  label:'AMBER',  stroke:'#8a6020', fill:'#f8f0e0', text:'#6a4010', glow:'glow-amber'  },
+    { key:'rose',   label:'ROSE',   stroke:'#8a3040', fill:'#f8eaec', text:'#6a1828', glow:'glow-rose'   },
+    { key:'navy',   label:'NAVY',   stroke:'#1e3a5f', fill:'#e8edf5', text:'#0e2040', glow:'glow-navy'   },
+    { key:'plum',   label:'PLUM',   stroke:'#5a2a6a', fill:'#f2eaf5', text:'#3a0a48', glow:'glow-plum'   },
+    { key:'rust',   label:'RUST',   stroke:'#7a3820', fill:'#f5ede8', text:'#5a1800', glow:'glow-rust'   },
+  ],
+};
+
+/* ═══════════════════════════════════════
+   STATE
+   ═══════════════════════════════════════ */
+let state = { nodes:[], links:[], selectedId:null, nextId:1, transform:{x:0,y:0,k:1} };
+let simulation=null, svgZoom=null, modalNodeId=null, driftHandle=null;
+let rolodexOpen = false;
+
+function refreshRolodex() {
+  if (rolodexOpen) buildRolodex();
+}
+
+/* ═══════════════════════════════════════
+   STORAGE
+   ═══════════════════════════════════════ */
+const STORE_KEY = 'lumon_mms_v4';
+
+function saveState() {
+  const snap = {
+    nodes: state.nodes.map(n => ({
+      id:n.id, label:n.label, x:n.x, y:n.y,
+      notes:n.notes||'', tags:n.tags||[],
+      colorKey:n.colorKey||'sage', isRoot:n.isRoot||false, scale:n.scale??1.0,
+    })),
+    links: state.links.map(l => ({ source:nodeId(l.source), target:nodeId(l.target) })),
+    nextId: state.nextId, transform: state.transform,
+  };
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(snap)); }
+  catch(e) { flash('⚠ STORAGE FULL — EXPORT NOW'); }
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) return false;
+    const d = JSON.parse(raw);
+    state.nodes = (d.nodes||[]).map(n => ({ ...n, fx:null, fy:null }));
+    state.links = d.links||[];
+    state.nextId = d.nextId || state.nodes.length+1;
+    state.transform = d.transform||{x:0,y:0,k:1};
+    return true;
+  } catch(e) { return false; }
+}
+
+/* ═══════════════════════════════════════
+   DEFAULTS
+   ═══════════════════════════════════════ */
+function defaults() {
+  const cx = window.innerWidth/2;
+  const cy = (window.innerHeight - 52) / 2 + 52;
+  state.nextId = 5;
+  state.nodes = [
+    { id:1, label:'ME',    x:cx,     y:cy,     isRoot:true,  notes:'', tags:[], colorKey:'white', scale:1.0 },
+    { id:2, label:'HEART', x:cx-200, y:cy-160, isRoot:false, notes:'', tags:[], colorKey:'rose',  scale:1.0 },
+    { id:3, label:'MIND',  x:cx+200, y:cy-160, isRoot:false, notes:'', tags:[], colorKey:'amber', scale:1.0 },
+    { id:4, label:'BODY',  x:cx,     y:cy+200, isRoot:false, notes:'', tags:[], colorKey:'navy',  scale:1.0 },
+  ];
+  state.links = [{source:1,target:2},{source:1,target:3},{source:1,target:4}];
+}
+
+/* ═══════════════════════════════════════
+   HELPERS
+   ═══════════════════════════════════════ */
+function nodeId(n) { return typeof n==='object' ? n.id : n; }
+function byId(id)  { return state.nodes.find(n=>n.id===id); }
+function colDef(k) { return CFG.colors.find(c=>c.key===k)||CFG.colors[0]; }
+function hasTag(n, tag) { return (n.tags||[]).map(t=>t.toUpperCase()).includes(tag.toUpperCase()); }
+
+function nodeDims(n) {
+  const s = n.isRoot ? 1.0 : (n.scale??1.0);
+  return {
+    w: n.isRoot ? CFG.rootNodeW : CFG.baseNodeW * s,
+    h: n.isRoot ? CFG.rootNodeH : CFG.baseNodeH * s,
+  };
+}
+function getCollideRadius(n) {
+  const {w,h} = nodeDims(n);
+  return Math.sqrt(w*w+h*h)/2 + 10;
+}
+function hexToRgb(hex) {
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return m ? { r:parseInt(m[1],16), g:parseInt(m[2],16), b:parseInt(m[3],16) } : null;
+}
+
+/* ═══════════════════════════════════════
+   NODE OPERATIONS
+   ═══════════════════════════════════════ */
+function addNode(parentId, label) {
+  const parent = byId(parentId);
+  const id = state.nextId++;
+  const ang = Math.random()*Math.PI*2;
+  const dist = CFG.linkDistance * 1.1;
+  const node = {
+    id, label: label||`NODE_${id}`,
+    x: (parent?.x ?? window.innerWidth/2)  + Math.cos(ang)*dist,
+    y: (parent?.y ?? window.innerHeight/2) + Math.sin(ang)*dist,
+    isRoot:false, notes:'', tags:[], colorKey:'sage', scale:1.0,
+  };
+  state.nodes.push(node);
+  if (parentId != null) state.links.push({ source:parentId, target:id });
+  saveState(); restart(); select(id);
+  flash(`✦ NODE_${id} CREATED`);
+  return id;
+}
+
+function deleteNode(id) {
+  if (state.nodes.length <= 1) { flash('⚠ CANNOT DELETE LAST NODE'); return; }
+  const n = byId(id);
+  if (n?.isRoot) { flash('⚠ CANNOT DELETE ROOT NODE'); return; }
+  state.nodes = state.nodes.filter(n => n.id !== id);
+  state.links = state.links.filter(l => nodeId(l.source)!==id && nodeId(l.target)!==id);
+  if (state.selectedId === id) state.selectedId = null;
+  saveState(); restart(); flash(`NODE ${id} DELETED`);
+}
+
+function select(id) {
+  state.selectedId = id;
+  applySelectionStyles(); highlightLinks(); updateStatus(); updateNodeToolbar(); updateGlowEl();
+}
+
+/* ═══════════════════════════════════════
+   SIMULATION
+   ═══════════════════════════════════════ */
+function initSim() {
+  simulation = d3.forceSimulation()
+    .force('link', d3.forceLink().id(d=>d.id).distance(CFG.linkDistance).strength(CFG.linkStrength))
+    .force('charge', d3.forceManyBody().strength(CFG.chargeStrength))
+    .force('collide', d3.forceCollide().radius(d=>getCollideRadius(d)).strength(CFG.collideStrength).iterations(2))
+    .force('cx', d3.forceX().strength(CFG.centerStrength))
+    .force('cy', d3.forceY().strength(CFG.centerStrength))
+    .alphaDecay(CFG.alphaDecay)
+    .alphaMin(CFG.alphaMin)
+    .velocityDecay(CFG.velocityDecay)
+    .on('tick', onTick)
+    .on('end', () => {});
+  simulation.alphaTarget(CFG.collideAlphaFloor).restart();
+}
+
+function restart() {
+  simulation.nodes(state.nodes);
+  simulation.force('link').links(state.links);
+  simulation.force('cx').x(window.innerWidth/2);
+  simulation.force('cy').y(window.innerHeight/2);
+  renderAll();
+  simulation.alphaTarget(CFG.collideAlphaFloor).alpha(0.5).restart();
+  updateStatus();
+}
+
+/* ═══════════════════════════════════════
+   DRIFT
+   ═══════════════════════════════════════ */
+function startDrift() {
+  stopDrift();
+  driftHandle = setInterval(() => {
+    if (dragging) return;
+    state.nodes.forEach(n => {
+      const ang = Math.random()*Math.PI*2;
+      n.vx = (n.vx||0) + Math.cos(ang)*CFG.driftMaxVel*Math.random();
+      n.vy = (n.vy||0) + Math.sin(ang)*CFG.driftMaxVel*Math.random();
+    });
+    simulation.alphaTarget(CFG.collideAlphaFloor).alpha(Math.max(simulation.alpha(), CFG.driftAlpha)).restart();
+  }, CFG.driftInterval);
+}
+function stopDrift() { if(driftHandle){clearInterval(driftHandle);driftHandle=null;} }
+
+/* ═══════════════════════════════════════
+   RENDERING REFS
+   ═══════════════════════════════════════ */
+const svgEl           = document.getElementById('chart');
+const linksLayer      = document.getElementById('links-layer');
+const nodesLayer      = document.getElementById('nodes-layer');
+const ripLayer        = document.getElementById('ripple-layer');
+const glowLayer       = document.getElementById('glow-layer');
+const urgentGlowLayer = document.getElementById('urgentglow-layer');
+const gridCanvas      = document.getElementById('grid-canvas');
+
+function renderAll() { renderLinks(); renderNodes(); drawGrid(); drawMinimap(); }
+
+/* ═══════════════════════════════════════
+   GRID
+   ═══════════════════════════════════════ */
+function drawGrid() {
+  const cr = document.getElementById('canvas-container').getBoundingClientRect();
+  const W = cr.width, H = cr.height;
+  gridCanvas.width = W; gridCanvas.height = H;
+  const ctx = gridCanvas.getContext('2d');
+  ctx.fillStyle = '#f5f2ec';
+  ctx.fillRect(0, 0, W, H);
+
+  const tr = state.transform, spacing = 32;
+  const dotR = Math.max(0.5, Math.min(2.0, 0.9 * tr.k));
+  const worldLeft   = -tr.x / tr.k,      worldTop    = -tr.y / tr.k;
+  const worldRight  = (W - tr.x) / tr.k, worldBottom = (H - tr.y) / tr.k;
+  const startCol = Math.floor(worldLeft/spacing),  endCol = Math.ceil(worldRight/spacing);
+  const startRow = Math.floor(worldTop/spacing),   endRow = Math.ceil(worldBottom/spacing);
+
+  ctx.fillStyle = '#d0cabb';
+  for (let col=startCol; col<=endCol; col++) {
+    for (let row=startRow; row<=endRow; row++) {
+      const sx = col*spacing*tr.k + tr.x;
+      const sy = row*spacing*tr.k + tr.y;
+      ctx.beginPath();
+      ctx.arc(sx, sy, dotR, 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+}
+
+/* ═══════════════════════════════════════
+   SELECTION GLOW
+   ═══════════════════════════════════════ */
+let glowEl = null;
+
+function updateGlowEl() {
+  if (glowEl) { glowEl.remove(); glowEl = null; }
+  if (!state.selectedId) return;
+  const nd = byId(state.selectedId); if (!nd) return;
+  const col = nd.isRoot ? { stroke:'#888880' } : colDef(nd.colorKey);
+  const rgb = hexToRgb(col.stroke) || { r:100, g:100, b:100 };
+  const {w,h} = nodeDims(nd);
+  const r = Math.max(w,h) * 1.7 + 36;
+  const gradId = `sel-grad-${state.selectedId}`;
+  const defs = d3.select(svgEl).select('defs');
+  defs.select(`#${gradId}`).remove();
+  const grad = defs.append('radialGradient').attr('id',gradId).attr('cx','50%').attr('cy','50%').attr('r','50%');
+  grad.append('stop').attr('offset','0%').attr('stop-color',`rgb(${rgb.r},${rgb.g},${rgb.b})`).attr('stop-opacity',0.22);
+  grad.append('stop').attr('offset','55%').attr('stop-color',`rgb(${rgb.r},${rgb.g},${rgb.b})`).attr('stop-opacity',0.07);
+  grad.append('stop').attr('offset','100%').attr('stop-color',`rgb(${rgb.r},${rgb.g},${rgb.b})`).attr('stop-opacity',0);
+  glowEl = d3.select(glowLayer).append('ellipse').attr('class','sel-glow')
+    .attr('cx',nd.x).attr('cy',nd.y).attr('rx',r).attr('ry',r*0.65)
+    .attr('fill',`url(#${gradId})`);
+}
+function updateGlowPos() {
+  if (!glowEl || !state.selectedId) return;
+  const nd = byId(state.selectedId); if (!nd) return;
+  glowEl.attr('cx', nd.x).attr('cy', nd.y);
+}
+
+/* ═══════════════════════════════════════
+   NODE TOOLBAR
+   ═══════════════════════════════════════ */
+function updateNodeToolbar() {
+  const toolbar = document.getElementById('node-toolbar');
+  const nd = state.selectedId ? byId(state.selectedId) : null;
+  const isVisible = !!nd;
+  toolbar.classList.toggle('visible', isVisible);
+  // Shift minimap and zoom controls up when toolbar visible
+  document.getElementById('minimap').classList.toggle('toolbar-up', isVisible);
+  document.getElementById('zoom-controls').classList.toggle('toolbar-up', isVisible);
+  if (!nd) return;
+  document.getElementById('ntb-label-name').textContent = nd.label;
+  document.getElementById('ntb-label-id').textContent = `#${nd.id} · ${nd.isRoot ? 'ROOT' : nd.colorKey.toUpperCase()}`;
+}
+
+document.getElementById('ntb-add').onclick   = () => { if(state.selectedId) addNode(state.selectedId); };
+document.getElementById('ntb-notes').onclick = () => { if(state.selectedId) openModal(state.selectedId); };
+document.getElementById('ntb-edit').onclick  = () => { if(state.selectedId) startEdit(byId(state.selectedId)); };
+document.getElementById('ntb-del').onclick   = () => { if(state.selectedId) deleteNode(state.selectedId); };
+
+/* ═══════════════════════════════════════
+   LINKS
+   ═══════════════════════════════════════ */
+function renderLinks() {
+  const sel = d3.select(linksLayer).selectAll('line.link')
+    .data(state.links, d => `${nodeId(d.source)}-${nodeId(d.target)}`);
+  sel.enter().append('line').attr('class','link');
+  sel.exit().remove();
+}
+function highlightLinks() {
+  d3.select(linksLayer).selectAll('line.link').attr('class', d => {
+    const s=nodeId(d.source), t=nodeId(d.target);
+    return (state.selectedId && (s===state.selectedId || t===state.selectedId)) ? 'link hot' : 'link';
+  });
+}
+
+/* ═══════════════════════════════════════
+   NODES
+   ═══════════════════════════════════════ */
+function renderNodes() {
+  const rx = CFG.cornerRadius;
+  const sel = d3.select(nodesLayer).selectAll('g.node').data(state.nodes, d=>d.id);
+
+  const enter = sel.enter().append('g').attr('class','node')
+    .call(d3.drag()
+      .on('start', onDragStart)
+      .on('drag',  onDragged)
+      .on('end',   onDragEnd))
+    .on('mousedown',   onNodeMouseDown)
+    .on('click',       onNodeClick)
+    .on('dblclick',    onNodeDblClick)
+    .on('contextmenu', onNodeCtx);
+
+  enter.append('rect').attr('class','node-body');
+  enter.append('text').attr('class','node-cross');
+  enter.append('text').attr('class','node-label');
+  enter.append('text').attr('class','node-id');
+  enter.append('circle').attr('class','node-note-dot').attr('r',3.5);
+  enter.append('circle').attr('class','ind-review').attr('r',5);
+  enter.append('circle').attr('class','ind-personal').attr('r',5);
+  enter.append('foreignObject').attr('class','edit-fo').style('display','none')
+    .append('xhtml:input').attr('class','inline-edit').attr('type','text');
+
+  const all = sel.merge(enter);
+  all.each(function(d) {
+    const g = d3.select(this);
+    const {w,h} = nodeDims(d);
+    const col = d.isRoot
+      ? { stroke:'#888880', fill:'#fdfbf6', text:'#1a1814', glow:'glow-white' }
+      : colDef(d.colorKey);
+    const isSel = d.id === state.selectedId;
+
+    g.select('.node-body')
+      .attr('x',-w/2).attr('y',-h/2).attr('width',w).attr('height',h)
+      .attr('rx',rx).attr('ry',rx)
+      .style('fill', col.fill)
+      .style('stroke', isSel ? col.text : col.stroke)
+      .style('stroke-width', isSel ? '2px' : '1.5px')
+      .style('filter', isSel ? `url(#${col.glow})` : 'none');
+
+    g.select('.node-cross')
+      .text(d.isRoot ? '✝' : '')
+      .attr('y', -h/2 - 11)
+      .style('fill', '#888880')
+      .style('display', d.isRoot ? null : 'none');
+
+    const fontSize = d.isRoot ? 14 : Math.max(9, 12 * (d.scale??1.0));
+    g.select('.node-label').text(d.label).attr('font-size', fontSize).style('fill', col.text);
+    g.select('.node-id').attr('x', w/2 - 5).attr('y', -h/2 + 9).style('fill', col.stroke).text(`#${d.id}`);
+
+    const hasNotes = d.notes?.trim().length > 0;
+    g.select('.node-note-dot').attr('cx', w/2-8).attr('cy', h/2-8)
+      .style('fill', col.stroke).style('opacity', hasNotes ? 0.8 : 0);
+
+    // REVIEW dot — blinking amber, top-right
+    const isReview = hasTag(d,'REVIEW');
+    const revDot = g.select('.ind-review')
+      .attr('cx', w/2 + 4).attr('cy', -h/2 - 4).attr('r', 4.5)
+      .style('fill','#ddaa00')
+      .style('stroke','#120d00').style('stroke-width','0.8px')
+      .style('display', isReview ? null : 'none');
+    revDot.selectAll('animate').remove();
+    if (isReview) {
+      revDot.append('animate')
+        .attr('attributeName','opacity')
+        .attr('values','1;1;0;0;1')
+        .attr('keyTimes','0;0.4;0.5;0.9;1')
+        .attr('dur','1.6s').attr('repeatCount','indefinite');
+    }
+
+    // PERSONAL dot — steady green, top-left
+    const isPersonal = hasTag(d,'PERSONAL');
+    g.select('.ind-personal')
+      .attr('cx', -w/2 - 4).attr('cy', -h/2 - 4).attr('r', 4.5)
+      .style('fill','#44aa44')
+      .style('stroke','#001200').style('stroke-width','0.8px')
+      .style('display', isPersonal ? null : 'none');
+  });
+
+  sel.exit().remove();
+  renderUrgentGlows();
+}
+
+/* ═══════════════════════════════════════
+   URGENT GLOW HALOS
+   ═══════════════════════════════════════ */
+function renderUrgentGlows() {
+  const urgentNodes = state.nodes.filter(n => hasTag(n,'URGENT'));
+  const defs = d3.select(svgEl).select('defs');
+
+  urgentNodes.forEach(d => {
+    const gid = `urg-grad-${d.id}`;
+    if (defs.select(`#${gid}`).empty()) {
+      const g = defs.append('radialGradient').attr('id',gid)
+        .attr('cx','50%').attr('cy','50%').attr('r','50%');
+      g.append('stop').attr('offset','0%').attr('stop-color','#cc1111').attr('stop-opacity','0.26');
+      g.append('stop').attr('offset','50%').attr('stop-color','#cc1111').attr('stop-opacity','0.09');
+      g.append('stop').attr('offset','100%').attr('stop-color','#cc1111').attr('stop-opacity','0');
+    }
+  });
+
+  d3.select(urgentGlowLayer).selectAll('circle.urgent-halo')
+    .data(urgentNodes, d=>d.id).exit().each(function(d){
+      defs.select(`#urg-grad-${d.id}`).remove();
+    }).remove();
+
+  const sel = d3.select(urgentGlowLayer).selectAll('circle.urgent-halo')
+    .data(urgentNodes, d=>d.id);
+
+  const enter = sel.enter().append('circle').attr('class','urgent-halo')
+    .attr('filter','url(#urgent-blur)');
+
+  enter.each(function() {
+    const el = d3.select(this);
+    el.append('animate')
+      .attr('attributeName','opacity').attr('values','0.55;0.88;0.55')
+      .attr('dur','2.8s').attr('repeatCount','indefinite').attr('calcMode','ease');
+    el.append('animate')
+      .attr('attributeName','r')
+      .attr('values', function(d) {
+        const {w,h}=nodeDims(d), base=Math.max(w,h)*0.78+26;
+        return `${base};${base+18};${base}`;
+      })
+      .attr('dur','2.8s').attr('repeatCount','indefinite').attr('calcMode','ease');
+  });
+
+  sel.merge(enter).each(function(d) {
+    const {w,h} = nodeDims(d);
+    d3.select(this)
+      .attr('cx', d.x??0).attr('cy', d.y??0)
+      .attr('r', Math.max(w,h)*0.78+26)
+      .style('fill', `url(#urg-grad-${d.id})`);
+  });
+}
+
+function updateUrgentGlowPos() {
+  d3.select(urgentGlowLayer).selectAll('circle.urgent-halo').each(function(d) {
+    const nd = byId(d.id); if(!nd) return;
+    d3.select(this).attr('cx', nd.x??0).attr('cy', nd.y??0);
+  });
+}
+
+/* ═══════════════════════════════════════
+   TICK
+   ═══════════════════════════════════════ */
+function onTick() {
+  d3.select(linksLayer).selectAll('line.link')
+    .attr('x1', d=>byId(nodeId(d.source))?.x??0)
+    .attr('y1', d=>byId(nodeId(d.source))?.y??0)
+    .attr('x2', d=>byId(nodeId(d.target))?.x??0)
+    .attr('y2', d=>byId(nodeId(d.target))?.y??0);
+
+  d3.select(nodesLayer).selectAll('g.node')
+    .attr('transform', d=>`translate(${d.x??0},${d.y??0})`);
+
+  updateGlowPos();
+  updateUrgentGlowPos();
+  drawMinimap();
+}
+
+function applySelectionStyles() {
+  d3.select(nodesLayer).selectAll('g.node').each(function(d) {
+    const g = d3.select(this);
+    const col = d.isRoot ? { stroke:'#888880', fill:'#fdfbf6', text:'#1a1814', glow:'glow-white' } : colDef(d.colorKey);
+    const isSel = d.id === state.selectedId;
+    g.select('.node-body')
+      .style('stroke', isSel ? col.text : col.stroke)
+      .style('stroke-width', isSel ? '2px' : '1.5px')
+      .style('filter', isSel ? `url(#${col.glow})` : 'none');
+  });
+  updateGlowEl();
+  updateNodeToolbar();
+}
+
+/* ═══════════════════════════════════════
+   RIPPLE
+   ═══════════════════════════════════════ */
+function spawnRipple(nd) {
+  const col = nd.isRoot ? '#888880' : colDef(nd.colorKey).stroke;
+  const layer = d3.select(ripLayer);
+  const rings = [];
+  const t0 = performance.now();
+  for (let i=0; i<CFG.rippleRings; i++) {
+    rings.push({
+      el: layer.append('circle').attr('class','ripple-ring')
+        .attr('cx',nd.x).attr('cy',nd.y).attr('r',0)
+        .style('stroke',col).style('stroke-width','1px'),
+      delay: i * CFG.rippleDelay,
+    });
+  }
+  (function tick(now) {
+    const elapsed = now - t0; let alive = false;
+    rings.forEach(r => {
+      const t = elapsed - r.delay; if (t<0) { alive=true; return; }
+      const p = Math.min(t/CFG.rippleDur, 1);
+      r.el.attr('r', p*CFG.rippleMaxR).style('opacity', (1-p)*0.55);
+      if (p<1) alive = true;
+    });
+    if (alive) requestAnimationFrame(tick);
+    else rings.forEach(r=>r.el.remove());
+  })(t0);
+}
+
+/* ═══════════════════════════════════════
+   ZOOM & PAN
+   ═══════════════════════════════════════ */
+function initZoom() {
+  svgZoom = d3.zoom().scaleExtent([0.06, 6])
+    .on('zoom', event => {
+      const t = event.transform;
+      d3.select('#main-group').attr('transform', `translate(${t.x},${t.y}) scale(${t.k})`);
+      state.transform = { x:t.x, y:t.y, k:t.k };
+      drawGrid();
+      drawMinimap();
+      updateGlowPos();
+    });
+  d3.select(svgEl).call(svgZoom);
+  const tr = state.transform;
+  d3.select(svgEl).call(svgZoom.transform, d3.zoomIdentity.translate(tr.x, tr.y).scale(tr.k));
+}
+
+function resetView() {
+  d3.select(svgEl).transition().duration(700).ease(d3.easeCubicInOut)
+    .call(svgZoom.transform, d3.zoomIdentity);
+}
+
+/* ═══════════════════════════════════════
+   DRAG + LONG PRESS (mobile)
+   ═══════════════════════════════════════ */
+let dragging = false, dragMoved = false;
+let longPressTimer = null, longPressData = null;
+
+function onDragStart(event, d) {
+  dragging = true; dragMoved = false;
+  // Long press detection for touch
+  if (event.sourceEvent && (event.sourceEvent.type === 'touchstart' || event.sourceEvent.type === 'pointerdown')) {
+    longPressData = { d };
+    longPressTimer = setTimeout(() => {
+      if (!dragMoved && longPressData) {
+        longPressData = null;
+        select(d.id);
+        spawnRipple(d);
+        showCtxMenu(d);
+      }
+    }, 480);
+  }
+  if (!event.active) simulation.alphaTarget(0.3).restart();
+  d.fx = d.x; d.fy = d.y;
+}
+function onDragged(event, d) {
+  dragMoved = true;
+  if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; longPressData = null; }
+  d.fx = event.x; d.fy = event.y;
+}
+function onDragEnd(event, d) {
+  dragging = false;
+  if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; longPressData = null; }
+  d.fx = null; d.fy = null;
+  if (!event.active) simulation.alphaTarget(CFG.collideAlphaFloor);
+  saveState();
+}
+
+/* ═══════════════════════════════════════
+   CLICK / DBLCLICK / CONTEXT
+   ═══════════════════════════════════════ */
+let editingId = null;
+
+function onNodeMouseDown(event, d) {
+  if (event.button !== 0) return;
+  if (!dragMoved) spawnRipple(d);
+}
+function onNodeClick(event, d) {
+  event.stopPropagation();
+  hideCtxMenu();
+  if (dragMoved) { dragMoved = false; return; }
+  if (state.selectedId === d.id) startEdit(d);
+  else select(d.id);
+}
+function onNodeDblClick(event, d) {
+  event.stopPropagation();
+  commitEdit();
+  openModal(d.id);
+}
+function onNodeCtx(event, d) {
+  event.preventDefault(); event.stopPropagation();
+  select(d.id); spawnRipple(d);
+  showCtxMenu(d);
+}
+
+d3.select(svgEl).on('click.deselect', event => {
+  if (event.target === svgEl || event.target.closest('#main-group') === null) {
+    select(null); hideCtxMenu(); commitEdit();
+  }
+});
+d3.select(svgEl).on('contextmenu.bg', e => e.preventDefault());
+
+/* ═══════════════════════════════════════
+   INLINE EDIT
+   ═══════════════════════════════════════ */
+function startEdit(d) {
+  if (!d) return;
+  commitEdit();
+  editingId = d.id;
+  const g = d3.select(nodesLayer).selectAll('g.node').filter(n => n.id === d.id);
+  const {w,h} = nodeDims(d);
+  const col = d.isRoot ? '#1a1814' : colDef(d.colorKey).text;
+  const fontSize = d.isRoot ? 14 : Math.max(9, 12*(d.scale??1.0));
+
+  g.select('.node-label').style('display','none');
+  g.select('.edit-fo')
+    .attr('x', -w/2+8).attr('y', -h/2+6)
+    .attr('width', w-16).attr('height', h-12)
+    .style('display', null);
+
+  const inp = g.select('.edit-fo input').node();
+  if (!inp) { editingId = null; return; }
+  inp.value = d.label;
+  inp.style.color = col;
+  inp.style.borderBottomColor = col;
+  inp.style.fontSize = fontSize+'px';
+  inp.focus(); inp.select();
+
+  inp.onkeydown = e => {
+    e.stopPropagation();
+    if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); commitEdit(); }
+  };
+  inp.onblur = () => commitEdit();
+}
+
+function commitEdit() {
+  if (editingId == null) return;
+  const d = byId(editingId); if (!d) { editingId = null; return; }
+  const g = d3.select(nodesLayer).selectAll('g.node').filter(n => n.id === editingId);
+  const inp = g.select('.edit-fo input').node();
+  if (inp) {
+    const v = inp.value.trim().toUpperCase();
+    if (v) d.label = v;
+  }
+  g.select('.node-label').style('display',null).text(d.label);
+  g.select('.edit-fo').style('display','none');
+  editingId = null;
+  saveState(); refreshRolodex();
+}
+
+/* ═══════════════════════════════════════
+   CONTEXT MENU — mobile bottom sheet
+   ═══════════════════════════════════════ */
+let ctxNode = null;
+
+function showCtxMenu(d) {
+  ctxNode = d;
+  const col = d.isRoot ? '#3a8a3a' : colDef(d.colorKey).stroke;
+  const menu = document.getElementById('context-menu');
+  const overlay = document.getElementById('ctx-overlay');
+  document.getElementById('ctx-title').textContent = `// ${d.label}`;
+  document.getElementById('ctx-title').style.color = col;
+  overlay.classList.add('open');
+  menu.style.display = 'block';
+  // Trigger transition next frame
+  requestAnimationFrame(() => menu.classList.add('open'));
+}
+function hideCtxMenu() {
+  const menu = document.getElementById('context-menu');
+  const overlay = document.getElementById('ctx-overlay');
+  menu.classList.remove('open');
+  overlay.classList.remove('open');
+  setTimeout(() => {
+    if (!menu.classList.contains('open')) menu.style.display = 'none';
+  }, 320);
+  ctxNode = null;
+}
+
+document.getElementById('ctx-add-child').onclick  = () => { if(ctxNode) addNode(ctxNode.id); hideCtxMenu(); };
+document.getElementById('ctx-edit-label').onclick = () => { if(ctxNode) startEdit(ctxNode); hideCtxMenu(); };
+document.getElementById('ctx-open-notes').onclick = () => { if(ctxNode) openModal(ctxNode.id); hideCtxMenu(); };
+document.getElementById('ctx-delete').onclick     = () => { if(ctxNode) deleteNode(ctxNode.id); hideCtxMenu(); };
+document.getElementById('ctx-overlay').addEventListener('click', hideCtxMenu);
+
+/* ═══════════════════════════════════════
+   MODAL
+   ═══════════════════════════════════════ */
+const colorRow = document.getElementById('modal-color-row');
+CFG.colors.forEach(c => {
+  const col = document.createElement('div'); col.className = 'swatch-col';
+  const sw  = document.createElement('div');
+  sw.className = 'color-swatch'; sw.dataset.key = c.key;
+  sw.style.background = c.fill; sw.style.border = `2px solid ${c.stroke}`; sw.title = c.label;
+  sw.onclick = () => {
+    colorRow.querySelectorAll('.color-swatch').forEach(s=>s.classList.remove('active'));
+    sw.classList.add('active');
+  };
+  const lbl = document.createElement('div'); lbl.className='swatch-label'; lbl.textContent=c.label;
+  col.appendChild(sw); col.appendChild(lbl); colorRow.appendChild(col);
+});
+
+const sizeSlider = document.getElementById('node-size-slider');
+const sizeVal    = document.getElementById('size-val');
+sizeSlider.addEventListener('input', () => {
+  sizeVal.textContent = parseFloat(sizeSlider.value).toFixed(2) + '×';
+});
+
+function openModal(id) {
+  const d = byId(id); if (!d) return;
+  modalNodeId = id;
+  const col = d.isRoot ? '#1a1814' : colDef(d.colorKey).text;
+  document.getElementById('modal-node-label').textContent = d.label;
+  document.getElementById('modal-node-label').style.color = col;
+  document.getElementById('modal-node-id').textContent = `${d.id}`;
+  document.getElementById('modal-notes').value = d.notes||'';
+
+  const tags = (d.tags||[]).map(t=>t.toUpperCase());
+  document.getElementById('tag-urgent').classList.toggle('active',   tags.includes('URGENT'));
+  document.getElementById('tag-review').classList.toggle('active',   tags.includes('REVIEW'));
+  document.getElementById('tag-personal').classList.toggle('active', tags.includes('PERSONAL'));
+
+  const ss = document.getElementById('size-section');
+  if (d.isRoot) { ss.style.display = 'none'; } else {
+    ss.style.display = '';
+    const sv = d.scale??1.0; sizeSlider.value = sv; sizeVal.textContent = sv.toFixed(2)+'×';
+  }
+  colorRow.querySelectorAll('.color-swatch').forEach(s =>
+    s.classList.toggle('active', s.dataset.key === (d.colorKey||'sage'))
+  );
+  document.getElementById('modal-overlay').classList.add('open');
+  setTimeout(() => document.getElementById('modal-notes').focus(), 80);
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('open');
+  modalNodeId = null;
+}
+
+function saveModal() {
+  if (!modalNodeId) return;
+  const d = byId(modalNodeId); if (!d) return;
+  d.notes = document.getElementById('modal-notes').value;
+
+  const newTags = [];
+  if (document.getElementById('tag-urgent').classList.contains('active'))   newTags.push('URGENT');
+  if (document.getElementById('tag-review').classList.contains('active'))   newTags.push('REVIEW');
+  if (document.getElementById('tag-personal').classList.contains('active')) newTags.push('PERSONAL');
+  d.tags = newTags;
+
+  const sw = colorRow.querySelector('.color-swatch.active');
+  if (sw) d.colorKey = sw.dataset.key;
+
+  if (!d.isRoot) {
+    d.scale = parseFloat(sizeSlider.value);
+    d.fx = null; d.fy = null;
+    simulation.force('collide').radius(nd => getCollideRadius(nd));
+    simulation.alphaTarget(CFG.collideAlphaFloor).alpha(0.3).restart();
+  }
+
+  renderNodes(); applySelectionStyles(); saveState(); refreshRolodex();
+  const ind = document.getElementById('modal-saved-indicator');
+  ind.classList.add('show');
+  setTimeout(() => ind.classList.remove('show'), 1600);
+  flash(`NODE ${d.id} SAVED`);
+}
+
+document.getElementById('modal-save-btn').onclick   = saveModal;
+document.getElementById('modal-close-btn').onclick  = closeModal;
+document.getElementById('modal-delete-btn').onclick = () => { if(modalNodeId){ deleteNode(modalNodeId); closeModal(); } };
+document.getElementById('modal-overlay').addEventListener('click', e => {
+  if (e.target === document.getElementById('modal-overlay')) closeModal();
+});
+document.getElementById('modal').addEventListener('keydown', e => {
+  if (e.ctrlKey && e.key === 's') { e.preventDefault(); saveModal(); }
+  if (e.key === 'Escape') closeModal();
+});
+
+['tag-urgent','tag-review','tag-personal'].forEach(id => {
+  document.getElementById(id).addEventListener('click', function() {
+    this.classList.toggle('active');
+  });
+});
+
+/* ═══════════════════════════════════════
+   HAMBURGER MENU
+   ═══════════════════════════════════════ */
+let drawerOpen = false;
+
+function openDrawer() {
+  drawerOpen = true;
+  document.getElementById('hamburger-drawer').classList.add('open');
+  document.getElementById('drawer-overlay').classList.add('open');
+}
+function closeDrawer() {
+  drawerOpen = false;
+  document.getElementById('hamburger-drawer').classList.remove('open');
+  document.getElementById('drawer-overlay').classList.remove('open');
+}
+
+document.getElementById('btn-hamburger').addEventListener('click', () => {
+  drawerOpen ? closeDrawer() : openDrawer();
+});
+document.getElementById('drawer-overlay').addEventListener('click', closeDrawer);
+
+document.getElementById('drawer-index').addEventListener('click', () => {
+  closeDrawer();
+  toggleRolodex();
+});
+document.getElementById('drawer-reset-view').addEventListener('click', () => {
+  closeDrawer(); resetView();
+});
+document.getElementById('drawer-export').addEventListener('click', () => {
+  closeDrawer();
+  exportData();
+});
+document.getElementById('drawer-import').addEventListener('click', () => {
+  closeDrawer();
+  document.getElementById('file-import').click();
+});
+document.getElementById('drawer-clear').addEventListener('click', () => {
+  closeDrawer();
+  if (!confirm('CLEAR ALL NODES AND LINKS?\nThis cannot be undone.')) return;
+  localStorage.removeItem(STORE_KEY);
+  defaults(); restart();
+  flash('✝ CHART RESET TO DEFAULT STATE');
+});
+
+/* ═══════════════════════════════════════
+   TOOLBAR BUTTONS
+   ═══════════════════════════════════════ */
+document.getElementById('btn-add-node').onclick = () => {
+  const pid = state.selectedId ?? state.nodes[0]?.id ?? null;
+  if (pid) addNode(pid); else addNode(null, 'NEW');
+};
+document.getElementById('btn-zoom-in').onclick  = () => d3.select(svgEl).transition().duration(280).call(svgZoom.scaleBy, 1.35);
+document.getElementById('btn-zoom-out').onclick = () => d3.select(svgEl).transition().duration(280).call(svgZoom.scaleBy, 0.74);
+
+function exportData() {
+  const data = {
+    version:'3.0', exported: new Date().toISOString(),
+    nodes: state.nodes.map(n => ({ id:n.id, label:n.label, x:n.x, y:n.y, notes:n.notes||'', tags:n.tags||[], colorKey:n.colorKey||'sage', isRoot:n.isRoot||false, scale:n.scale??1.0 })),
+    links: state.links.map(l => ({ source:nodeId(l.source), target:nodeId(l.target) })),
+    nextId: state.nextId,
+  };
+  const a = Object.assign(document.createElement('a'), {
+    href:     URL.createObjectURL(new Blob([JSON.stringify(data,null,2)], { type:'application/json' })),
+    download: `brainbug_${Date.now()}.json`,
+  });
+  a.click(); URL.revokeObjectURL(a.href);
+  flash('✓ EXPORTED TO JSON');
+}
+
+document.getElementById('file-import').onchange = e => {
+  const file = e.target.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      const d = JSON.parse(ev.target.result);
+      if (!d.nodes || !d.links) throw 0;
+      state.nodes = d.nodes; state.links = d.links;
+      state.nextId = d.nextId || d.nodes.length+1;
+      saveState(); restart();
+      flash(`✓ IMPORTED ${d.nodes.length} NODES`);
+    } catch { flash('⚠ IMPORT FAILED: INVALID FILE'); }
+  };
+  reader.readAsText(file); e.target.value = '';
+};
+
+/* ═══════════════════════════════════════
+   KEYBOARD SHORTCUTS (desktop)
+   ═══════════════════════════════════════ */
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  if (editingId != null) return;
+  if (document.getElementById('modal-overlay').classList.contains('open')) return;
+
+  switch (e.key) {
+    case 'a': case 'A': {
+      e.preventDefault();
+      const pid = state.selectedId ?? state.nodes[0]?.id;
+      if (pid) addNode(pid);
+      break;
+    }
+    case 'e': case 'E': {
+      e.preventDefault();
+      if (state.selectedId) startEdit(byId(state.selectedId));
+      break;
+    }
+    case 'n': case 'N': {
+      e.preventDefault();
+      if (state.selectedId) openModal(state.selectedId);
+      break;
+    }
+    case 'Delete': case 'Backspace': {
+      if (state.selectedId) { e.preventDefault(); deleteNode(state.selectedId); }
+      break;
+    }
+    case 'r': case 'R': {
+      e.preventDefault();
+      resetView();
+      break;
+    }
+    case 'Escape': {
+      select(null); commitEdit(); hideCtxMenu(); closeModal(); closeDrawer();
+      break;
+    }
+  }
+});
+
+/* ═══════════════════════════════════════
+   FLASH TOAST
+   ═══════════════════════════════════════ */
+let flashTimer = null;
+const toast = document.getElementById('status-toast');
+
+function flash(msg) {
+  toast.textContent = msg;
+  toast.classList.add('show');
+  if (flashTimer) clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => toast.classList.remove('show'), 2800);
+}
+
+function updateStatus() {
+  refreshRolodex();
+}
+
+/* ═══════════════════════════════════════
+   MINIMAP
+   ═══════════════════════════════════════ */
+function drawMinimap() {
+  const canvas = document.getElementById('minimap-canvas');
+  const ctx    = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  if (!state.nodes.length) return;
+
+  let x0=Infinity, y0=Infinity, x1=-Infinity, y1=-Infinity;
+  state.nodes.forEach(n => {
+    x0=Math.min(x0,n.x); x1=Math.max(x1,n.x);
+    y0=Math.min(y0,n.y); y1=Math.max(y1,n.y);
+  });
+  const pad=50; x0-=pad; y0-=pad; x1+=pad; y1+=pad;
+  const bw=x1-x0, bh=y1-y0;
+  if (bw<1||bh<1) return;
+  const sc = Math.min(W/bw, H/bh) * 0.86;
+  const ox = (W - bw*sc)/2 - x0*sc;
+  const oy = (H - bh*sc)/2 - y0*sc;
+
+  // Links
+  ctx.strokeStyle = '#2a2a2a'; ctx.lineWidth = 0.8;
+  state.links.forEach(l => {
+    const s=byId(nodeId(l.source)), t=byId(nodeId(l.target));
+    if (!s||!t) return;
+    ctx.beginPath(); ctx.moveTo(s.x*sc+ox, s.y*sc+oy); ctx.lineTo(t.x*sc+ox, t.y*sc+oy); ctx.stroke();
+  });
+
+  // Nodes
+  state.nodes.forEach(n => {
+    const mx=n.x*sc+ox, my=n.y*sc+oy;
+    const c = n.isRoot ? '#888880' : colDef(n.colorKey).stroke;
+    ctx.fillStyle = c;
+    ctx.globalAlpha = n.id === state.selectedId ? 1.0 : 0.55;
+    ctx.fillRect(mx-3, my-2, 6, 3.5);
+    ctx.globalAlpha = 1;
+  });
+
+  // Viewport rect
+  const tr = state.transform;
+  const containerH = document.getElementById('canvas-container').getBoundingClientRect().height;
+  const vx=(-tr.x/tr.k)*sc+ox, vy=(-tr.y/tr.k)*sc+oy;
+  const vw=(window.innerWidth/tr.k)*sc, vh=(containerH/tr.k)*sc;
+  ctx.strokeStyle='#3a3a3a'; ctx.lineWidth=0.8; ctx.strokeRect(vx,vy,vw,vh);
+}
+
+/* ═══════════════════════════════════════
+   ROLODEX
+   ═══════════════════════════════════════ */
+const rdxPanel = document.getElementById('rolodex-panel');
+
+function getNodeChildren(id) {
+  return state.links
+    .filter(l => nodeId(l.source) === id || nodeId(l.target) === id)
+    .map(l => {
+      const tid = nodeId(l.source) === id ? nodeId(l.target) : nodeId(l.source);
+      return byId(tid);
+    })
+    .filter(n => n && !n.isRoot);
+}
+
+const TAG_COLORS = { URGENT:'#cc2222', REVIEW:'#ddaa00', PERSONAL:'#44aa44' };
+
+function buildRolodex() {
+  const rootNode = state.nodes.find(n => n.isRoot);
+  const topNodes = rootNode
+    ? state.links
+        .filter(l => nodeId(l.source) === rootNode.id || nodeId(l.target) === rootNode.id)
+        .map(l => {
+          const tid = nodeId(l.source) === rootNode.id ? nodeId(l.target) : nodeId(l.source);
+          return byId(tid);
+        })
+        .filter(Boolean)
+    : state.nodes.filter(n => !n.isRoot).slice(0, 3);
+
+  document.getElementById('rdx-count').textContent = `${topNodes.length} RECORD${topNodes.length!==1?'S':''}`;
+
+  const rdxCards = document.getElementById('rdx-cards');
+  rdxCards.innerHTML = '';
+  topNodes.forEach(node => {
+    const cd      = colDef(node.colorKey || 'sage');
+    const children = getNodeChildren(node.id);
+    const hasNotes = node.notes && node.notes.trim();
+
+    const card = document.createElement('div');
+    card.className = `rdx-card color-${node.colorKey || 'sage'}`;
+    card.dataset.id = node.id;
+
+    const childrenHTML = children.length
+      ? children.map(c => {
+          const ccd = colDef(c.colorKey || 'sage');
+          const tagDots = (c.tags||[]).map(t =>
+            `<span class="rdx-tag-dot" style="background:${TAG_COLORS[t]||'#888'}"></span>`
+          ).join('');
+          return `<div class="rdx-child-row" data-child-id="${c.id}">
+            <span class="rdx-child-dot" style="background:${ccd.stroke}"></span>
+            <span class="rdx-child-name">${c.label}</span>
+            <span class="rdx-child-tags">${tagDots}</span>
+          </div>`;
+        }).join('')
+      : `<div class="rdx-no-children">NO LINKED NODES</div>`;
+
+    const notesHTML = hasNotes
+      ? `<div class="rdx-notes">${node.notes.replace(/\n/g,'<br>')}</div>`
+      : `<div class="rdx-notes rdx-notes-empty">No notes on record.</div>`;
+
+    const childLabel = children.length ? `${children.length} LINK${children.length!==1?'S':''}` : '';
+    const noteBadge  = hasNotes ? '✎' : '';
+
+    card.innerHTML = `
+      <div class="rdx-card-tab">
+        <span class="rdx-tab-color" style="background:${cd.stroke}"></span>
+        <span class="rdx-tab-label">${node.label}</span>
+        ${childLabel ? `<span class="rdx-tab-badge">${childLabel}</span>` : ''}
+        ${noteBadge  ? `<span class="rdx-tab-id">${noteBadge}</span>` : ''}
+        <span class="rdx-tab-id">ID·${node.id}</span>
+        <span class="rdx-tab-arrow">▶</span>
+      </div>
+      <div class="rdx-card-body">
+        <div class="rdx-card-body-inner">
+          <div class="rdx-card-content">
+            <div class="rdx-section-label">LINKED NODES</div>
+            <div class="rdx-children-list">${childrenHTML}</div>
+            <div class="rdx-section-label">NOTES</div>
+            ${notesHTML}
+          </div>
+        </div>
+      </div>`;
+
+    card.querySelector('.rdx-card-tab').addEventListener('click', () => {
+      const wasOpen = card.classList.contains('expanded');
+      rdxCards.querySelectorAll('.rdx-card').forEach(c => c.classList.remove('expanded'));
+      if (!wasOpen) card.classList.add('expanded');
+    });
+
+    card.querySelectorAll('.rdx-child-row').forEach(row => {
+      row.addEventListener('click', e => {
+        e.stopPropagation();
+        const cid = parseInt(row.dataset.childId);
+        select(cid);
+        const cn = byId(cid);
+        if (cn) {
+          const containerH = document.getElementById('canvas-container').getBoundingClientRect().height;
+          const tx = window.innerWidth/2  - cn.x * state.transform.k;
+          const ty = containerH/2 - cn.y * state.transform.k;
+          d3.select(svgEl).transition().duration(420)
+            .call(svgZoom.transform, d3.zoomIdentity.translate(tx, ty).scale(state.transform.k));
+        }
+        // Close rolodex after navigation on mobile
+        toggleRolodex();
+        flash(`↗ NAVIGATED TO ${byId(cid)?.label || cid}`);
+      });
+    });
+
+    rdxCards.appendChild(card);
+  });
+}
+
+function toggleRolodex() {
+  rolodexOpen = !rolodexOpen;
+  rdxPanel.classList.toggle('open', rolodexOpen);
+  if (rolodexOpen) buildRolodex();
+}
+
+document.getElementById('rdx-close-btn').addEventListener('click', () => {
+  rolodexOpen = false;
+  rdxPanel.classList.remove('open');
+});
+
+/* ═══════════════════════════════════════
+   BOOT
+   ═══════════════════════════════════════ */
+function boot() {
+  const loaded = loadState();
+  if (!loaded || state.nodes.length === 0) defaults();
+
+  initSim(); initZoom(); renderAll();
+
+  simulation.nodes(state.nodes);
+  simulation.force('link').links(state.links);
+  simulation.force('cx').x(window.innerWidth/2).strength(0.03);
+  simulation.force('cy').y((window.innerHeight - 52) / 2 + 52).strength(0.03);
+  simulation.alphaTarget(CFG.collideAlphaFloor).alpha(0.7).restart();
+
+  drawGrid();
+  flash(loaded ? '✝ RECORD RESTORED' : '✝ GOD IS GOOD. WELCOME TO BRAINBUG.');
+  setTimeout(startDrift, 4000);
+}
+
+window.addEventListener('resize', () => {
+  simulation.force('cx').x(window.innerWidth/2);
+  simulation.force('cy').y((window.innerHeight - 52) / 2 + 52);
+  simulation.alpha(0.1).restart();
+  drawGrid();
+});
+
+setInterval(saveState, 20000);
+boot();
+</script>
+</body>
+</html>
